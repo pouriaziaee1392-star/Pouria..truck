@@ -1,0 +1,81 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*','**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Ensure Android SDK + tools (install required SDK tools)
+        # this action installs Android SDK command-line tools needed by Gradle
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          force-avd-creation: false
+
+      - name: Make gradlew executable if present
+        run: |
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            echo "gradlew is present and made executable."
+          else
+            echo "WARNING: gradlew not found in repository root."
+          fi
+
+      - name: Build Debug APK (use gradlew if present, otherwise install Gradle and run)
+        run: |
+          set -e
+          if [ -f "./gradlew" ]; then
+            echo "Using gradlew wrapper from repository"
+            ./gradlew clean assembleDebug --no-daemon
+          else
+            echo "Gradle wrapper not found; installing Gradle and running gradle assembleDebug"
+            # Install a specific Gradle version (change if you need another)
+            GRADLE_VER=8.4.1
+            wget -q https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip -O /tmp/gradle.zip
+            sudo unzip -qq /tmp/gradle.zip -d /opt/gradle
+            export PATH=/opt/gradle/gradle-${GRADLE_VER}/bin:$PATH
+            gradle --version
+            # Run build
+            gradle clean assembleDebug --no-daemon
+          fi
+
+      - name: Collect APKs (if exist)
+        run: |
+          echo "Listing possible apk output folders"
+          ls -la app/build/outputs || true
+          find app/build/outputs -type f -name "*.apk" -print || true
+
+      - name: Upload APK artifact (stable v4)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pouria-truck-apk
+          path: |
+            app/build/outputs/**/*.apk
+          retention-days: 7
